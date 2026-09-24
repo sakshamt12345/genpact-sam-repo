@@ -1,0 +1,23 @@
+[project]
+name = "software_asset_management"
+version = "0.1.0"
+description = "Software Asset Management using crewAI"
+authors = [{ name = "Your Name", email = "you@example.com" }]
+requires-python = ">=3.10,<3.14"
+dependencies = [
+    "crewai[azure-ai-inference,tools]>=1.15.18,<2.0.0",
+]
+
+[project.scripts]
+kickoff = "software_asset_management.main:kickoff"
+run_crew = "software_asset_management.main:kickoff"
+plot = "software_asset_management.main:plot"
+run_with_trigger = "software_asset_management.main:run_with_trigger"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.crewai]
+type = "flow"
+project_id = "d84e1c57-64e8-4489-9fc3-b85e10cee164"

@@ -1,0 +1,285 @@
+#Authentication Task
+authentication_task:
+  description: >
+    Authenticate and verify the employee requesting the software operation.
+    The user's OHR is: {ohr}
+
+    Use the authentication/verify_user tool to verify this employee using
+    the OHR provided above. Do not ask the user for their OHR again since
+    it has already been supplied.
+  expected_output: >
+    Requirements:
+    - Do not ask the user for identity information if the OHR is already available.
+    - Use only the OHR for identity verification.
+    - Do not proceed if verification fails.
+    - Retrieve the verified OHR and required employee information (Name, Email, Title, Employee Type).
+    - Do not expose OAuth credentials, passwords, client secrets, or access tokens in the task output.
+  agent: authentication_agent
+
+
+#Intent Classifier Task
+classify_intent_task:
+  description: >
+    A verified employee (OHR: {ohr}) has submitted this request: "{user_message}"
+
+    Determine two things:
+    1. Is this request for the employee themselves, or on behalf of someone
+       else? If someone else, extract that person's name if mentioned.
+    2. What type of request is this — Install, Uninstall, Renew, Transfer,
+       Update, or General Query (use General Query if it doesn't clearly
+       fit the other categories, e.g. "what software do I have installed").
+
+    Also extract the software name if one is mentioned.
+  expected_output: >
+    A structured classification with request_for, on_behalf_of,
+    request_type, software_name, and a one-line summary.
+  agent: intent_classifier_agent
+
+
+#Install Task
+resolve_software_task:
+  description: >
+    An employee wants software matching this description: "{software_name}"
+
+    Use the Software Library Lookup tool to fetch the full catalog of
+    registered software_name entries.
+
+    STEP 1 — Scan the ENTIRE catalog and list EVERY entry that shares
+    the same core product/brand keyword(s) as the employee's input.
+    Do this even if one entry is an exact string match — other related
+    entries can still exist.
+
+    STEP 1.5 — CRITICAL: Every single entry you found in STEP 1 must be
+    accounted for in your final output — either folded into
+    matched_software/a candidate's unique_name (if it's a duplicate or
+    version of something already listed), or listed as its own separate
+    candidate. Do NOT silently drop any entry you found. Before
+    finalizing your answer, count the entries you found in STEP 1 and
+    verify each one maps to something in your output. If you cannot
+    justify why an entry was dropped, keep it as its own candidate
+    instead.
+
+    STEP 2 — Determine which entries are the SAME underlying product
+    (differing only by version/build/architecture, or by trivial
+    cosmetic suffixes like ".app", "Software", "Browser" when they
+    refer to the identical product with no functional difference)
+    versus which are genuinely DIFFERENT distinct products or editions.
+    When in doubt whether two similarly-named entries are the same
+    product or different ones, treat them as DIFFERENT and list both 
+    it is safer to ask the user to pick than to silently guess wrong.
+
+    STEP 3 — Decide:
+    - If STEP 1 found only ONE distinct product/edition after
+      collapsing, set matched_software and confidence "high".
+    - If STEP 1 found TWO OR MORE distinct products/editions, list ALL
+      of them in candidates and set confidence "ambiguous".
+    - If nothing matches, set confidence "none".
+
+    In your reasoning, explicitly state how many entries you found in
+    STEP 1 and confirm each one is represented in your final answer.
+  expected_output: >
+    A structured result with matched_software, candidates (each with
+    unique_name and reasoning), confidence, and an overall reasoning
+    string that confirms no catalog entries were dropped.
+  agent: install_agent
+
+get_software_details_task:
+  description: >
+    The software has already been resolved to: "{resolved_software}"
+
+    Use the Software Details Lookup tool with sys_param set to
+    "{resolved_software}" to retrieve all active (active=true) version
+    records for this software, including cost, tool_tip, blacklisted
+    status, active status, category, and software_name.
+
+    Return all matching version records exactly as retrieved — do not
+    filter, summarize, or alter them further; filtering by active
+    status is already handled by the tool.
+  expected_output: >
+    A structured result with software_name and a list of version
+    records (each with version, cost, tool_tip, blacklisted, active,
+    category, software_name).
+  agent: install_agent
+
+check_assignment_task:
+  description: >
+    Check the assignment and install status for software "{software_name}"
+    on device serial number "{serial_number}", for employee OHR: {ohr}.
+
+    Use the Software Assignment Check tool with:
+    - ohr: {ohr}
+    - serial_number: {serial_number}
+    - software_name: {software_name}
+    - version: "" (always blank)
+    - source: "airwatch" (always this value)
+
+    Return all records exactly as retrieved — if multiple versions are
+    assigned, include one record per assigned version showing which are
+    actually installed. Do not filter, summarize, or alter the data.
+  expected_output: >
+    A structured result with software_name and a list of assignment
+    records (each with name, display_name, assigned_status,
+    assigned_version, installed_status, installed_version, meta).
+  agent: install_agent
+
+
+#Device Task
+fetch_devices_task:
+  description: >
+    Fetch all devices registered to the employee with OHR: {ohr}
+
+    Use the Device Lookup tool with this OHR to retrieve their devices.
+    Return the full list exactly as retrieved, including status,
+    serial_number, model, and last_seen for each device.
+  expected_output: >
+    A structured result with ohr and a list of devices (each with
+    status, serial_number, model, last_seen).
+  agent: device_agent
+
+
+classify_and_resolve_license_task:
+  description: >
+    The software "{software_name}" has been categorized as a "License"
+    type product.
+
+    STEP 1 — Determine if it is a genuine Microsoft product or falls
+    under a Microsoft license suite, using this reference list:
+    | Actual License Name | Category |
+    |---------------------|---------------------------|
+    | Office 365 E3 | software_license_check |
+    | Intune | software_license_check |
+    | Power BI Pro | software_license_check |
+    | Microsoft 365 Copilot | software_license_check |
+    | Office 365 E1 | software_license_check |
+    | PowerApps and Logic Flows | software_license_check |
+    | Microsoft Fabrics Free | software_license_check |
+    | Microsoft Teams Premium | software_license_check |
+    | Power BI Premium Per User | software_license_check |
+    | Microsoft Copilot Studio | software_license_check |
+    | Project online Essentials | software_license_check |
+    | Power Automate Premium Per User Plan | software_license_check |
+    | Visio Plan 2 | software_license_check |
+    | Project Plan 3 | software_license_check |
+    | E3 to E1 Downgrade request | software_license_check |
+    | F3 to E3 Upgrade request | software_license_check |
+    | F3 to E1 Upgrade request | software_license_check |
+    | E3 to F3 Downgrade request | software_license_check |
+    | E1 to F3 Downgrade request | software_license_check |
+
+    If it is NOT Microsoft-related at all, set is_microsoft_product to
+    false and leave actual_license_name and category as null.
+
+    STEP 2 — If it IS Microsoft-related, resolve it to the most relevant
+    entry in this Actual License Name / Category reference table. The
+    table entries are LICENSE SKUs, not individual product names — every
+    Microsoft product, app, or generic suite request maps to exactly one
+    of these SKUs as its governing entitlement:
+    [YOUR TABLE]
+
+    Use semantic matching, not exact string matching:
+    - "Office 365", "Microsoft Word", "Microsoft Excel", "Microsoft
+      Outlook", "Microsoft Teams", "PowerPoint" — these are all
+      individual apps or generic names covered under a broader Office
+      365 license SKU. Match them to the relevant Office 365 SKU in the
+      table (e.g. "Office 365 E3"), not left unmatched just because the
+      exact words don't appear in the table.
+    - Similarly, any Microsoft product or app name should be mapped to
+      whichever table entry represents the license SKU that actually
+      grants access to it, reasoning from what you know about Microsoft
+      licensing bundles (e.g. Visio requires a Visio-specific plan, not
+      the general Office 365 SKU; Project requires a Project plan; core
+      Office apps and Teams typically fall under the general Office 365
+      SKU).
+    - Only leave actual_license_name and category as null if you cannot
+      reasonably determine ANY relevant SKU for this product from the
+      table and your knowledge of Microsoft licensing — this should be
+      rare, since nearly every Microsoft product maps to some license.
+
+    Set actual_license_name to the exact matching license name string
+    from the table (copied exactly as it appears), and category to
+    EXACTLY one of these two literal values, copied exactly as it
+    appears in the table's Category column for that row — no other
+    text, punctuation, or variation: "software_license_check" or
+    "deny_group_check".
+
+    In your reasoning, explain which SKU you matched to and why, even
+    if the product name didn't literally appear in the table.
+  expected_output: >
+    A structured result with is_microsoft_product, actual_license_name
+    (the matched SKU, or null only if truly no relevant SKU exists),
+    category (must be exactly "software_license_check",
+    "deny_group_check", or null), and reasoning.
+  agent: license_agent
+
+
+check_license_task:
+  description: >
+    For employee OHR: {ohr}, run the License Group Check tool with:
+    - category: "{license_category}"
+    - ohr: {ohr}
+    - software_license_check: "{license_name}" if category is
+      "software_license_check", otherwise leave blank
+    - deny_group_check: "{license_name}" if category is
+      "deny_group_check", otherwise leave blank
+
+    Only populate the ONE field matching the category — the other must
+    stay blank.
+  expected_output: >
+    A structured result with response (whether the user is part of the
+    group or not) and group_name.
+  agent: license_agent
+
+
+check_ticket_and_duplicate_task:
+  description: >
+    An employee (OHR: {ohr}, on-behalf OHR: {onbehalf_ohr}) is requesting:
+    "{requested_software_name}" (catalog sys_id: {catalog_sysid})
+
+    STEP 1 — Use the DuplicateTicketCheck tool to retrieve tickets and/or
+    the create-ticket flag, passing:
+    - ohr: {ohr}
+    - onbehalf_ohr: {onbehalf_ohr}
+    - nl_context: "{nl_context}"
+    - catalog_sysid: "{catalog_sysid}"
+
+    STEP 2 — If has_active_ticket is true, use the RITMDetails tool with
+    the returned tickets list and requested_software_name to check for a
+    duplicate against the current request.
+
+    STEP 3 — If has_active_ticket is false, set duplicate_found to false,
+    matching_tickets to empty, and copy the 'flag' value from the
+    DuplicateTicketCheck tool's output EXACTLY as returned — do not
+    modify, reformat, or omit it.
+  expected_output: >
+    A structured result with requested_software_name, duplicate_found,
+    matching_tickets, and flag (null if a duplicate exists, otherwise
+    the exact flag string from the tool).
+  agent: ticket_agent
+
+
+push_software_task:
+  description: >
+    Push the install of "{software_name}" version "{version}" to device
+    serial number "{serial_number}" for employee OHR: {ohr}.
+
+    Use the Software Push tool with ohr, serial_number, software_name,
+    version, and source: "airwatch". Only call this after confirming
+    the software is free and either assigned to the employee or has
+    otherwise passed the applicable entitlement check.
+  expected_output: >
+    A structured result with software_name, version, serial_number, and
+    success.
+  agent: installation_request_agent
+
+
+generate_ritm_task:
+  description: >
+    Generate a tracking RITM for the install of "{software_name}"
+    version "{version}" on device "{serial_number}" for employee OHR:
+    {ohr}.
+
+    Use the RITM Generation tool with ohr, software_name, version, and
+    serial_number.
+  expected_output: >
+    A structured result with software_name, version, and ritm_number.
+  agent: installation_request_agent
